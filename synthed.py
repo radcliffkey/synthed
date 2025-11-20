@@ -54,8 +54,20 @@ SCALES = [
         },
     ),
     Scale(
-        name="G Major Pentatonic",
-        frequencies=[98.0, 110.0, 123.5, 146.8, 164.8, 196.0],
+        name="D Minor Pentatonic",
+        frequencies=[146.8, 174.6, 196.0, 220.0, 261.6, 293.7],
+        chords={
+            "Dm": [0, 1, 3],
+            "F": [1, 3, 4],
+            "Gsus4": [2, 4, 5],
+            "Am7": [3, 4, 0, 2],
+            "Csus4": [4, 1, 2],
+            "Csus2": [4, 5, 2],
+        },
+    ),
+    Scale(
+        name="G Major Pentatonic (High)",
+        frequencies=[196.0, 220.0, 246.9, 293.7, 329.6, 392.0],
         chords={
             "G": [0, 2, 3],
             "Em": [4, 0, 2],
@@ -70,8 +82,8 @@ SCALES = [
         },
     ),
     Scale(
-        name="E Minor Pentatonic",
-        frequencies=[82.4, 98.0, 110.0, 123.5, 146.8, 164.8],
+        name="E Minor Pentatonic (High)",
+        frequencies=[329.6, 392.0, 440.0, 493.9, 587.3, 659.2],
         chords={
             "Em": [0, 1, 4],
             "G": [1, 3, 4],
@@ -80,18 +92,6 @@ SCALES = [
             "Dsus4": [4, 1, 2],
             "Dsus2": [4, 5, 2],
             "Em7": [0, 1, 4, 2],
-        },
-    ),
-    Scale(
-        name="D Minor Pentatonic",
-        frequencies=[146.8, 174.6, 196.0, 220.0, 261.6, 293.7],
-        chords={
-            "Dm": [0, 1, 3],
-            "F": [1, 3, 4],
-            "Gsus4": [2, 4, 5],
-            "Am7": [3, 4, 0, 2],
-            "Csus4": [4, 1, 2],
-            "Csus2": [4, 5, 2],
         },
     ),
 ]
@@ -119,6 +119,8 @@ class Synthesizer:
         self.lfo_phase: float = 0.0
         self.random_mode: bool = False
         self.current_chord_name: str = ""
+        self.waveforms: list[str] = ["Sine", "Square", "Sawtooth", "Triangle"]
+        self.current_waveform_index: int = 0
         # Thread-safe queue to pass audio data to the visualizer
         self.q: Queue[np.ndarray] = Queue(maxsize=10)
 
@@ -128,7 +130,9 @@ class Synthesizer:
         new_scale = self.scales[self.current_scale_index]
 
         # Update frequencies for existing voices
-        # We assume all scales have 6 notes
+        # Handle scales with different numbers of notes gracefully
+        # If scale has fewer notes, only update available voices
+        # If scale has more notes, only update existing voices
         for i, freq in enumerate(new_scale.frequencies):
             if i < len(self.voices):
                 self.voices[i].freq = freq
@@ -140,6 +144,10 @@ class Synthesizer:
 
         # Reset chord name
         self.current_chord_name = ""
+
+    def next_waveform(self) -> None:
+        """Switch to the next waveform type."""
+        self.current_waveform_index = (self.current_waveform_index + 1) % len(self.waveforms)
 
     def toggle_voice_state(self, index: int) -> None:
         """Toggle a specific voice on or off."""
@@ -184,7 +192,11 @@ class Synthesizer:
         Audio callback for sounddevice.
         """
         if status:
-            pass
+            # Log audio stream status issues (underflow/overflow)
+            if status.input_underflow or status.output_underflow:
+                pass  # Common in real-time audio, can be ignored
+            if status.input_overflow or status.output_overflow:
+                pass  # Buffer issues, usually recoverable
 
         # Initialize signal buffer
         final_signal = np.zeros((frame_cnt, 1))
@@ -207,8 +219,30 @@ class Synthesizer:
             phases: np.ndarray = v.phase + np.arange(frame_cnt) * inc
             phases = phases.reshape(-1, 1)
 
-            # Generate sine wave
-            signal: np.ndarray = OSC_AMP * v.current_amp * np.sin(2 * np.pi * phases)
+            # Generate waveform
+            # Thread-safe: read index once and validate bounds
+            idx = self.current_waveform_index
+            if idx < 0 or idx >= len(self.waveforms):
+                idx = 0  # Fallback to safe index
+            wave_type = self.waveforms[idx]
+            raw_wave: np.ndarray
+
+            if wave_type == "Sine":
+                raw_wave = np.sin(2 * np.pi * phases)
+            elif wave_type == "Square":
+                raw_wave = np.sign(np.sin(2 * np.pi * phases))
+            elif wave_type == "Sawtooth":
+                # Standard sawtooth: linear ramp from -1 to 1
+                # (phases % 1) goes 0->1. multiply by 2 -> 0->2. subtract 1 -> -1->1.
+                raw_wave = 2.0 * (phases % 1.0) - 1.0
+            elif wave_type == "Triangle":
+                # Triangle: linear up/down between -1 and 1
+                # (phases % 1) * 4 - 2 goes -2->2. abs -> 2->0->2. subtract 1 -> 1->-1->1.
+                raw_wave = np.abs((phases % 1.0) * 4.0 - 2.0) - 1.0
+            else:
+                raw_wave = np.zeros_like(phases)
+
+            signal: np.ndarray = OSC_AMP * v.current_amp * raw_wave
             final_signal += signal
 
             # Update phase
@@ -285,6 +319,8 @@ def draw_visualizer(stdscr: curses.window, synth: Synthesizer) -> None:
             elif key in (ord("r"), ord("R")):
                 synth.set_random_mode(True)
                 last_change_time = time.time()
+            elif key in (ord("w"), ord("W")):
+                synth.next_waveform()
             elif key in (ord("s"), ord("S")):
                 synth.next_scale()
                 # If in random mode, trigger immediate update
@@ -302,19 +338,24 @@ def draw_visualizer(stdscr: curses.window, synth: Synthesizer) -> None:
         try:
             # Get latest audio chunk
             data: np.ndarray = synth.q.get_nowait()
-            # assert data.ndim == 2 and data.shape[1] == 1, f"visualizer data shape mismatch: {data.shape}"
+            # Ensure data is 2D with shape (N, 1) for consistent indexing
+            if data.ndim == 1:
+                data = data.reshape(-1, 1)
 
             # Clear screen
             stdscr.erase()
 
             # Draw Info
             stdscr.addstr(
-                0, 0, "Polyphonic Synth (1-6: Note, R: Random, S: Scale, C: Clear, Q: Quit)", curses.color_pair(2)
+                0, 0,
+                "Polyphonic Synth (1-6: Note, R: Random, S: Scale, W: Wave, C: Clear, Q: Quit)",
+                curses.color_pair(2),
             )
 
-            # Draw Scale Name
+            # Draw Scale Name and Waveform
             scale_name = synth.scales[synth.current_scale_index].name
-            stdscr.addstr(1, 0, f"Scale: {scale_name}", curses.color_pair(1))
+            wave_name = synth.waveforms[synth.current_waveform_index]
+            stdscr.addstr(1, 0, f"Scale: {scale_name} | Wave: {wave_name}", curses.color_pair(1))
 
             # Draw Active Notes
             status_str = "Active: "
@@ -329,7 +370,10 @@ def draw_visualizer(stdscr: curses.window, synth: Synthesizer) -> None:
 
             # Draw Waveform
             # We downsample the buffer to fit the screen width
-            # Ensure step is at least 1
+            # Ensure step is at least 1, handle edge case where max_x is 0
+            if max_x <= 0 or len(data) == 0:
+                stdscr.refresh()
+                continue
             step: int = max(1, len(data) // max_x)
 
             for x in range(0, max_x - 1):
@@ -340,6 +384,9 @@ def draw_visualizer(stdscr: curses.window, synth: Synthesizer) -> None:
                     sample: float = float(data[idx][0])
 
                     # Calculate height offset from center
+                    # Avoid division by zero if max_y is too small
+                    if max_y <= 1:
+                        continue
                     height_offset: int = int(sample * (max_y / 2) * 0.8)
 
                     # Plot point
@@ -349,7 +396,7 @@ def draw_visualizer(stdscr: curses.window, synth: Synthesizer) -> None:
                     y_pos = max(0, min(max_y - 1, y_pos))
 
                     try:
-                        stdscr.addch(y_pos, x, "@", curses.color_pair(2))  # ░ ▓ ▒ █
+                        stdscr.addch(y_pos, x, "◉", curses.color_pair(2))  # ░ ▓ ▒ █
                     except curses.error:
                         # Ignore errors drawing to bottom-right corner
                         pass
@@ -359,8 +406,10 @@ def draw_visualizer(stdscr: curses.window, synth: Synthesizer) -> None:
         except Empty:
             # Queue is empty, just wait for next frame
             pass
-        except Exception:
-            # Catch other errors to prevent crash, but maybe log them in real app
+        except (curses.error, ValueError, IndexError) as e:
+            # Handle expected errors gracefully
+            # curses.error: drawing outside screen bounds
+            # ValueError/IndexError: array shape issues
             pass
 
 
