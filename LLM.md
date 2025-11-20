@@ -48,6 +48,7 @@ User Input → Synthesizer → Voices (Sine Waves) → LFO → Audio Output
 - `1-6`: Toggle individual notes (manual mode)
 - `R`: Enable random/generative mode
 - `S`: Switch to next scale
+- `W`: Switch waveform
 - `C`: Clear all notes (disable random mode)
 - `Q`: Quit application
 
@@ -57,6 +58,8 @@ User Input → Synthesizer → Voices (Sine Waves) → LFO → Audio Output
 - `numpy>=2.3.5`: Audio buffer manipulation
 - `sounddevice>=0.5.3`: Real-time audio I/O
 - `curses`: Built-in, terminal UI (Unix-like systems)
+
+Non-python dependency: `libportaudio2` has to be installed on your system.
 
 ### Python Version
 - Requires Python 3.12+ (uses modern type hints)
