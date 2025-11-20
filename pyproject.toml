@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "synthed"
+version = "0.1.0"
+description = "Algorithmic music generator with CLI visualization"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.3.5",
+    "sounddevice>=0.5.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black>=24.0.0",
+]
+
+[tool.black]
+line-length = 120
