@@ -1,4 +1,4 @@
-# CLAUDE.md - Project Context for AI Assistants
+# LLM.md - Project Context for AI Assistants
 
 ## Project Overview
 
@@ -8,18 +8,18 @@
 
 ### Core Components
 
-1. **Synthesizer Class** (`main.py`)
+1. **Synthesizer Class** (`synthed.py`)
    - Manages multiple voices (polyphonic synthesis)
    - Handles scale switching and chord progression
    - Provides audio callback for sounddevice
    - Thread-safe queue for visualization data
 
-2. **Voice Class** (`main.py`)
+2. **Voice Class** (`synthed.py`)
    - Individual oscillator with phase tracking
    - Smooth amplitude enveloping
    - Target amplitude for smooth transitions
 
-3. **Scale Class** (`main.py`)
+3. **Scale Class** (`synthed.py`)
    - Defines frequency sets (pentatonic scales)
    - Contains chord dictionaries for each scale
    - 6 notes per scale (5 distinct + octave)
@@ -74,13 +74,13 @@ User Input → Synthesizer → Voices (Sine Waves) → LFO → Audio Output
 ## Common Tasks
 
 ### Adding a New Scale
-1. Add to `SCALES` list in `main.py`
+1. Add to `SCALES` list in `synthed.py`
 2. Define 6 frequencies (pentatonic + octave)
 3. Define chord dictionary with note indices
 4. Scale will automatically appear in rotation (S key)
 
 ### Modifying Synthesis Parameters
-Key constants at top of `main.py`:
+Key constants at top of `synthed.py`:
 - `SAMPLE_RATE`: Audio sample rate
 - `BLOCK_SIZE`: Audio buffer size
 - `SMOOTHING_FACTOR`: Envelope smoothing (0-1)
@@ -116,7 +116,7 @@ Audio synthesis happens in `Synthesizer.callback()`:
 
 Run the synthesizer:
 ```bash
-uv run main.py
+uv run synthed.py
 ```
 
 Expected behavior:
